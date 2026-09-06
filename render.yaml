@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: devicecare-backend
+    runtime: docker
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: devicecare-db
+          property: connectionString
+      - key: ADMIN_KEY
+        generateValue: true
+      - key: DATABASE_SSL
+        value: "true"
+
+databases:
+  - name: devicecare-db
+    plan: free

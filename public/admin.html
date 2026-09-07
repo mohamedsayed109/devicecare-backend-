@@ -112,7 +112,7 @@ async function api(path, options = {}) {
 
 async function connect() {
   baseUrl = document.getElementById("baseUrl").value.trim();
-  adminKey = document.getElementById("adminKey").value;
+  adminKey = document.getElementById("adminKey").value.replace(/[^\x20-\x7E]/g, "").trim();
   const statusEl = document.getElementById("connectStatus");
   try {
     await loadCompanies();

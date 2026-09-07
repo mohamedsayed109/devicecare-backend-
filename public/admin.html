@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeviceCare Admin Console</title>
+<style>
+  :root {
+    --bg: #14181F; --surface: #1B212B; --surface-2: #212836; --border: #2A3140;
+    --text: #E8EAED; --text-muted: #8A93A3; --ok: #3FB88A; --crit: #E2574C;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text); font-family: system-ui, sans-serif;
+    margin: 0; padding: 16px; max-width: 480px; margin: 0 auto;
+  }
+  h1 { font-size: 18px; margin: 8px 0 4px; }
+  h2 { font-size: 14px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 24px 0 10px; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+  label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+  input, select {
+    width: 100%; background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+    padding: 10px 12px; border-radius: 8px; font-size: 14px; margin-bottom: 10px;
+  }
+  button {
+    background: var(--ok); color: #08130F; border: none; padding: 11px 16px; border-radius: 8px;
+    font-size: 14px; font-weight: 600; cursor: pointer; width: 100%;
+  }
+  button:disabled { opacity: 0.5; }
+  button.secondary { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .item {
+    display: flex; justify-content: space-between; align-items: center; padding: 10px 0;
+    border-top: 1px solid var(--border); font-size: 13px;
+  }
+  .item:first-child { border-top: none; }
+  .muted { color: var(--text-muted); font-size: 12px; }
+  .status { font-size: 12px; margin-top: 8px; padding: 8px 10px; border-radius: 6px; display: none; }
+  .status.ok { display: block; background: rgba(63,184,138,0.12); border: 1px solid rgba(63,184,138,0.35); color: var(--ok); }
+  .status.err { display: block; background: rgba(226,87,76,0.12); border: 1px solid rgba(226,87,76,0.35); color: var(--crit); }
+  pre {
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+    font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+  }
+  .copy-btn { margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<h1>DeviceCare Admin Console</h1>
+<div class="muted">Connects directly to your live backend. Nothing here is stored anywhere except this browser tab.</div>
+
+<h2>1. Connect</h2>
+<div class="panel">
+  <label>Backend URL</label>
+  <input id="baseUrl" placeholder="https://devicecare-backend.vercel.app" value="https://devicecare-backend.vercel.app">
+  <label>Admin Key</label>
+  <input id="adminKey" type="password" placeholder="Your ADMIN_KEY">
+  <button onclick="connect()">Connect</button>
+  <div id="connectStatus" class="status"></div>
+</div>
+
+<div id="mainSection" style="display:none;">
+  <h2>2. Companies</h2>
+  <div class="panel">
+    <div class="row">
+      <input id="newCompanyName" placeholder="New company name">
+      <button style="width:auto;" onclick="createCompany()">Add</button>
+    </div>
+    <div id="companyList"></div>
+  </div>
+
+  <h2>3. Machines</h2>
+  <div class="panel">
+    <label>Company</label>
+    <select id="companySelect" onchange="loadMachines()"></select>
+    <div class="row">
+      <input id="newMachineName" placeholder="Machine name (e.g. DESKTOP-ABC123)">
+      <button style="width:auto;" onclick="registerMachine()">Register</button>
+    </div>
+    <div id="machineList"></div>
+  </div>
+
+  <div id="newKeyPanel" class="panel" style="display:none;">
+    <h2 style="margin-top:0;">agent-config.json</h2>
+    <div class="muted">Save this as <code>agent-config.json</code> next to DeviceCare.ps1 on the machine you just registered. (Or run Register-Machine.ps1 instead - either works.)</div>
+    <pre id="configOutput"></pre>
+    <button class="secondary copy-btn" onclick="copyConfig()">Copy to clipboard</button>
+  </div>
+</div>
+
+<script>
+let baseUrl = "", adminKey = "";
+
+function showStatus(el, msg, ok) {
+  el.textContent = msg;
+  el.className = "status " + (ok ? "ok" : "err");
+}
+
+async function api(path, options = {}) {
+  const res = await fetch(baseUrl.replace(/\/$/, "") + path, {
+    ...options,
+    headers: { "Content-Type": "application/json", "X-Admin-Key": adminKey, ...(options.headers || {}) },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Server returned ${res.status}`);
+  }
+  return res.json();
+}
+
+async function connect() {
+  baseUrl = document.getElementById("baseUrl").value.trim();
+  adminKey = document.getElementById("adminKey").value;
+  const statusEl = document.getElementById("connectStatus");
+  try {
+    await loadCompanies();
+    showStatus(statusEl, "Connected.", true);
+    document.getElementById("mainSection").style.display = "block";
+  } catch (e) {
+    showStatus(statusEl, "Couldn't connect: " + e.message, false);
+  }
+}
+
+async function loadCompanies() {
+  const companies = await api("/api/v1/admin/companies");
+  const listEl = document.getElementById("companyList");
+  const selectEl = document.getElementById("companySelect");
+  listEl.innerHTML = companies.length ? "" : '<div class="muted">No companies yet.</div>';
+  selectEl.innerHTML = "";
+  companies.forEach((c) => {
+    listEl.innerHTML += `<div class="item"><span>${c.name}</span><span class="muted">${c.id.slice(0,8)}…</span></div>`;
+    const opt = document.createElement("option");
+    opt.value = c.id; opt.textContent = c.name;
+    selectEl.appendChild(opt);
+  });
+  if (companies.length) loadMachines();
+}
+
+async function createCompany() {
+  const name = document.getElementById("newCompanyName").value.trim();
+  if (!name) return;
+  await api("/api/v1/admin/companies", { method: "POST", body: JSON.stringify({ name }) });
+  document.getElementById("newCompanyName").value = "";
+  await loadCompanies();
+}
+
+async function loadMachines() {
+  const companyId = document.getElementById("companySelect").value;
+  if (!companyId) return;
+  const machines = await api(`/api/v1/admin/companies/${companyId}/machines`);
+  const listEl = document.getElementById("machineList");
+  listEl.innerHTML = machines.length ? "" : '<div class="muted">No machines yet for this company.</div>';
+  machines.forEach((m) => {
+    listEl.innerHTML += `<div class="item"><span>${m.name}</span><span class="muted">${m.status}</span></div>`;
+  });
+}
+
+async function registerMachine() {
+  const companyId = document.getElementById("companySelect").value;
+  const name = document.getElementById("newMachineName").value.trim();
+  if (!companyId || !name) return;
+  const machine = await api(`/api/v1/admin/companies/${companyId}/machines`, {
+    method: "POST", body: JSON.stringify({ name }),
+  });
+  document.getElementById("newMachineName").value = "";
+  const config = JSON.stringify({ apiUrl: baseUrl, apiKey: machine.apiKey }, null, 2);
+  document.getElementById("configOutput").textContent = config;
+  document.getElementById("newKeyPanel").style.display = "block";
+  await loadMachines();
+}
+
+function copyConfig() {
+  const text = document.getElementById("configOutput").textContent;
+  navigator.clipboard.writeText(text);
+}
+</script>
+
+</body>
+</html>
